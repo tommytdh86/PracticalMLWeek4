@@ -1,0 +1,156 @@
+---
+title: "Practical machine learning week 4"
+output: html_document
+---
+
+## R Markdown
+
+
+```{r setup}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "pml-training.csv"
+testFile  <- "pml-testing.csv"
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile)
+}
+```
+
+## Cleaning data
+
+
+```{r clean}
+library(caret)
+library(randomForest)
+library(corrplot)
+library(manipulate)
+library(xtable)
+data <- read.csv("pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+dim(data)
+```
+
+## Training data
+
+
+```{r training}
+
+data1 <- data[, colSums(is.na(data)) < nrow(data) * 0.3]
+test1 <- testing[, colSums(is.na(testing)) < nrow(testing) * 0.3]
+
+
+NZV <- nearZeroVar(data1, saveMetrics= TRUE)
+data2 <- data1[,!NZV$nzv]
+test2 <- test1[,!NZV$nzv]
+
+
+data3 <- data2[,-c(1:6)]
+test3 <- test2[,-c(1:6)]
+
+set.seed(1)
+inTrain <- createDataPartition(y=data3$classe, p=0.60, list=FALSE)
+training <- data3[inTrain,]
+valid <- data3[-inTrain,]
+
+corrPlot <- cor(training[, -53])
+corrplot(corrPlot, method="color")
+```
+
+
+```{r modelling}
+rf1<- train(x=training[,-53],y=training$classe,method="rf",
+                trControl=trainControl(method = "cv", number = 4),
+                data=training,do.trace=F,ntree=250)
+
+rf1
+rf1$times
+# Testing the model on the same data used to create it: to evaluate in sample error 
+pred_train_rf1 <- predict(rf1$finalModel,newdata=training)
+a <- confusionMatrix(pred_train_rf1,training$classe)
+print(xtable(as.matrix(a)),type="HTML")
+
+ISE_rf1<- 100- (mean((pred_train_rf1 == training$classe)*1)*100)
+ISE_rf1
+
+# Out of Sample Error Estimate
+pred_valid_rf1 <- predict(rf1,valid)
+table(pred_valid_rf1,valid$classe)
+
+OSE_rf1<-100 - (mean((pred_valid_rf1 == valid$classe)*1)*100)
+OSE_rf1
+
+# Confusion Matrix
+b <- confusionMatrix(valid$classe,pred_valid_rf1)
+print(xtable(as.matrix(b)),type="HTML")
+
+pred_test_rf1 <- predict(rf1,test3[,-53])
+pred_test_rf1
+
+table(pred_test_rf1)
+
+```
+
+```{r relative}
+# Overall relative importance
+
+importance <- varImp(rf1, scale=FALSE)
+# Importance of each feature for each of the classe outcomes
+plot(importance)
+
+dotPlot(importance, top = 15)
+
+# Identifying the top 15 vriables
+
+variables <- varImp(rf1)
+vars <- variables[[1]]
+top.vars <- rownames(vars)[order(rowSums(vars), decreasing = TRUE)][1:15]
+
+# Examining the correlations again
+corrPlot1 <- cor(training[, top.vars])
+corrplot(corrPlot1, method="color")
+
+top_rf <- train(x = training[ , top.vars], y = training$classe, method="rf",
+                trControl=trainControl(method = "cv", number = 4),
+                data=training,do.trace=F,ntree=250)
+
+# Checr user and elapsed times
+top_rf$times
+
+pred_train_top <- predict(top_rf,newdata=training)
+c <- confusionMatrix(pred_train_top,training$classe)
+print(xtable(as.matrix(c)),type="HTML")
+
+# In sample error with the top 15 variables
+ISE_top<- 100- (mean((pred_train_top == training$classe)*1)*100)
+ISE_top
+
+pred_valid_top <- predict(top_rf,valid)
+d <- confusionMatrix(pred_valid_top,valid$classe)
+print(xtable(as.matrix(d)),type="HTML")
+
+# Out of sample error with the top 15 variables
+OSE_top<-100 - (mean((pred_valid_top == valid$classe)*1)*100)
+OSE_top
+
+
+
+```
+
+
+```{r resul}
+identical(pred_train_top,pred_test_rf1)
+
+plot(c(52,15),c(OSE_rf1,OSE_top),type="l",
+     col=2,lwd=2,xlab="# fe atured included in the model",
+     ylab = "Out of Sample Error Estimates", 
+     main= 'Out of Sample Error Estimates Vs # Features in RF model',
+     xlim = c(20,50))
+
+OSE_rf1
+
+OSE_top
+
+```
